@@ -19,11 +19,11 @@ function findDatedConversation(userMessage, tzOffset) {
   for (const day of ref.candidates) {
     const messages = messagesBetween(day.start, day.end);
     if (messages.length) {
-      return { label: day.label, start: day.start, messages, facts: factsBetween(day.start, day.end) };
+      return { label: day.label, start: day.start, end: day.end, messages, facts: factsBetween(day.start, day.end) };
     }
   }
   const first = ref.candidates[0];
-  return { label: first.label, start: first.start, messages: [], facts: [] };
+  return { label: first.label, start: first.start, end: first.end, messages: [], facts: [] };
 }
 
 function formatPast(past) {
@@ -40,6 +40,8 @@ function formatPast(past) {
 
 export async function* runAgent(userMessage, { tzOffset = 0 } = {}) {
   const today = userToday(new Date(), tzOffset);
+  const t0 = Date.now();
+  const timing = {}; // logged once per turn, to find where time goes
 
   // 1. Code gathers context (before saving, so this message can't match itself)
   const dated = findDatedConversation(userMessage, tzOffset);
@@ -48,7 +50,23 @@ export async function* runAgent(userMessage, { tzOffset = 0 } = {}) {
 
   // 2. ONE fast LLM call: standalone rewrite + route + topic + queries
   const plan = await planTurn({ question: userMessage, today, recent, dated });
+  timing.router = Date.now() - t0;
+
+  // Guard: code backs up the LLM on what code can verify. If the user named a PAST day
+  // that has a stored conversation, they're referring back to it, so "search" becomes "recall_verify".
+  if (plan.route === "search" && dated?.messages.length && dated.end.getTime() <= Date.now()) {
+    plan.route = "recall_verify";
+  }
+  // Guard: "verify" needs the user to actually ask about change or correctness.
+  // "What did I ask you on 3 Nov?" has no such word, so it is pure recall (no search).
+  const asksAboutChange = /\b(still|correct|accurate|true|wrong|chang|since|new|update|differ|outdated|valid)/i;
+  if (plan.route === "recall_verify" && !asksAboutChange.test(userMessage)) {
+    plan.route = "recall";
+    plan.queries = [];
+  }
   console.log(`[router] ${plan.route}/${plan.topic} | "${plan.standalone}" |`, plan.queries);
+  // The UI ignores this event; tests use it to check routing decisions
+  yield { type: "plan", ...plan };
 
   // 3. Recall routes: the dated conversation, or recent chat if no date was given
   const isRecall = plan.route === "recall" || plan.route === "recall_verify";
@@ -69,6 +87,7 @@ export async function* runAgent(userMessage, { tzOffset = 0 } = {}) {
       perQuery: 3,
       maxResults: Math.max(6, plan.queries.length + 2),
     });
+    timing.search = Date.now() - t0 - timing.router;
   }
   const sources = results.map(({ title, url }) => ({ title, url }));
   if (sources.length) yield { type: "sources", sources };
@@ -98,6 +117,10 @@ export async function* runAgent(userMessage, { tzOffset = 0 } = {}) {
     ],
     { reasoningEffort: plan.route === "recall_verify" ? "medium" : "low" }
   )) {
+    if (!fullReply) {
+      timing.firstToken = Date.now() - t0;
+      console.log(`[timing] router=${timing.router}ms search=${timing.search ?? 0}ms firstToken=${timing.firstToken}ms`);
+    }
     fullReply += text;
     yield { type: "token", text };
   }

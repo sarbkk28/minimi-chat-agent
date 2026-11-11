@@ -1,16 +1,19 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite"; // built into Node 22.13+, nothing to compile
 import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
-mkdirSync("data", { recursive: true });
-const db = new DatabaseSync("data/agent.db");
+// DB_PATH lets tests use a throwaway database instead of your real chat history
+const DB_PATH = process.env.DB_PATH || "data/agent.db";
+mkdirSync(dirname(DB_PATH), { recursive: true });
+const db = new DatabaseSync(DB_PATH);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     role       TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content    TEXT NOT NULL,
-    sources    TEXT,
-    created_at TEXT NOT NULL
+    sources    TEXT,              -- JSON array of {title, url}, assistant only
+    created_at TEXT NOT NULL      -- ISO timestamp in UTC
   );
   CREATE INDEX IF NOT EXISTS idx_messages_created ON messages (created_at);
 
@@ -34,6 +37,7 @@ export function saveMessage({ role, content, sources = null, createdAt = new Dat
   ).run(role, content, sources ? JSON.stringify(sources) : null, createdAt.toISOString());
 }
 
+// Ordered by time, not id: seeded past messages get newer ids but older timestamps
 export function recentMessages(limit = 6) {
   return db
     .prepare("SELECT role, content, created_at FROM messages ORDER BY created_at DESC LIMIT ?")
@@ -48,6 +52,7 @@ export function allMessages() {
     .map((m) => ({ ...m, sources: m.sources ? JSON.parse(m.sources) : [] }));
 }
 
+// ISO strings sort correctly as text, so a string range comparison works
 export function messagesBetween(start, end, limit = 20) {
   return db
     .prepare(

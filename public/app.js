@@ -2,6 +2,11 @@ const chat = document.getElementById("chat");
 const form = document.getElementById("form");
 const input = document.getElementById("input");
 
+// gpt-oss sometimes writes citations as 【3†L1-L4】; normalize to [3].
+// Applied to the WHOLE text at render time, because the junk can be split across streamed chunks.
+const cleanCitations = (s) =>
+  s.replace(/【/g, "[").replace(/】/g, "]").replace(/†[^\]\s]*/g, "");
+
 function addUserBubble(text) {
   const div = document.createElement("div");
   div.className = "msg user";
@@ -30,9 +35,9 @@ function addBotBubble() {
 
   return {
     setStatus: (t) => (status.textContent = t),
-    setText: (md) => (body.innerHTML = DOMPurify.sanitize(marked.parse(md))),
+    setText: (md) => (body.innerHTML = DOMPurify.sanitize(marked.parse(cleanCitations(md)))),
     setSources: (sources) => {
-      if (!sources.length) return;
+      if (!sources || !sources.length) return;
       sourcesEl.className = "sources";
       sourcesEl.innerHTML = sources
         .map((s, i) => `<a href="${s.url}" target="_blank">[${i + 1}] ${s.title}</a>`)
@@ -47,7 +52,7 @@ const scrollDown = () => (chat.scrollTop = chat.scrollHeight);
 const dayLabel = (date) =>
   date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
-let lastDay = ""; // tracks the last divider shown, so new messages today don't repeat it
+let lastDay = ""; // last divider shown, so new messages today don't repeat it
 
 // On page load: redraw previous conversation from the server, with date dividers
 async function loadHistory() {
@@ -95,6 +100,7 @@ form.addEventListener("submit", async (e) => {
     body: JSON.stringify({ message, tzOffset: -new Date().getTimezoneOffset() }),
   });
 
+  // Read the NDJSON stream line by line as it arrives
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
