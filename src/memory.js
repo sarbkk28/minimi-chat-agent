@@ -13,7 +13,20 @@ db.exec(`
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_messages_created ON messages (created_at);
+
+  -- Structured snapshots of checkable facts (prices, versions, plans), with when we saw them
+  CREATE TABLE IF NOT EXISTS facts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity      TEXT NOT NULL,
+    attribute   TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    source_url  TEXT,
+    observed_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_facts_observed ON facts (observed_at);
 `);
+
+// ---------- messages ----------
 
 export function saveMessage({ role, content, sources = null, createdAt = new Date() }) {
   db.prepare(
@@ -35,12 +48,29 @@ export function allMessages() {
     .map((m) => ({ ...m, sources: m.sources ? JSON.parse(m.sources) : [] }));
 }
 
-// All messages inside [start, end): used for "what did I ask on <date>?"
-// ISO strings sort correctly as text, so a simple string comparison works.
 export function messagesBetween(start, end, limit = 20) {
   return db
     .prepare(
       "SELECT role, content, created_at FROM messages WHERE created_at >= ? AND created_at < ? ORDER BY created_at LIMIT ?"
     )
     .all(start.toISOString(), end.toISOString(), limit);
+}
+
+// ---------- facts ----------
+
+export function saveFacts(facts, observedAt = new Date()) {
+  const insert = db.prepare(
+    "INSERT INTO facts (entity, attribute, value, source_url, observed_at) VALUES (?, ?, ?, ?, ?)"
+  );
+  for (const f of facts) {
+    insert.run(f.entity, f.attribute, f.value, f.source_url ?? null, observedAt.toISOString());
+  }
+}
+
+export function factsBetween(start, end) {
+  return db
+    .prepare(
+      "SELECT entity, attribute, value, source_url, observed_at FROM facts WHERE observed_at >= ? AND observed_at < ? ORDER BY entity"
+    )
+    .all(start.toISOString(), end.toISOString());
 }
