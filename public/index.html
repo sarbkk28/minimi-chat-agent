@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Agent</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- marked: renders the model's markdown (tables, bold). DOMPurify: strips unsafe HTML. -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+</head>
+<body>
+  <main id="chat"></main>
+  <form id="form">
+    <input id="input" placeholder="Ask anything…" autocomplete="off" />
+    <button>Send</button>
+  </form>
+  <script src="app.js"></script>
+</body>
+</html>
